@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1 class="header">Add New Account</h1>
+    
+    <div class="nav">
+        <a href="{{ url_for('index') }}">Back to Main</a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'error' if category == 'error' else 'success' }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <form method="POST" style="max-width: 500px; margin: 0 auto;">
+        <div style="margin-bottom: 15px;">
+            <label for="website" style="display: block; margin-bottom: 5px; font-weight: bold;">Website:</label>
+            <input type="text" id="website" name="website" required 
+                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <label for="username" style="display: block; margin-bottom: 5px; font-weight: bold;">Username/Email:</label>
+            <input type="text" id="username" name="username" required 
+                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+        </div>
+
+        <div style="margin-bottom: 15px;">
+            <label for="password" style="display: block; margin-bottom: 5px; font-weight: bold;">Password:</label>
+            <input type="password" id="password" name="password" required 
+                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+        </div>
+
+        <div style="margin-bottom: 20px;">
+            <label for="notes" style="display: block; margin-bottom: 5px; font-weight: bold;">Notes (optional):</label>
+            <textarea id="notes" name="notes" rows="3" 
+                      style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px; resize: vertical;"></textarea>
+        </div>
+
+        <div style="text-align: center;">
+            <button type="submit" 
+                    style="background-color: #007bff; color: white; padding: 10px 20px; border: none; border-radius: 3px; cursor: pointer;">
+                Add Account
+            </button>
+            <a href="{{ url_for('index') }}" 
+               style="display: inline-block; margin-left: 10px; padding: 10px 20px; text-decoration: none; 
+                      color: #6c757d; border: 1px solid #6c757d; border-radius: 3px;">
+                Cancel
+            </a>
+        </div>
+    </form>
+{% endblock %}
