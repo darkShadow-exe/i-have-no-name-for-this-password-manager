@@ -309,3 +309,132 @@ button:hover {
         font-size: 14px;
     }
 }
+
+/* User authentication styles */
+.user-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 0;
+    margin-bottom: 20px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.user-info {
+    font-weight: bold;
+    color: #333;
+}
+
+.logout-btn {
+    background-color: #dc3545;
+    color: white;
+    padding: 8px 15px;
+    text-decoration: none;
+    border-radius: 3px;
+    font-size: 14px;
+}
+
+.logout-btn:hover {
+    background-color: #c82333;
+    color: white;
+}
+
+/* Login page styles */
+.login-container {
+    max-width: 400px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+.login-form {
+    background-color: #f8f9fa;
+    padding: 30px;
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+    margin-bottom: 20px;
+}
+
+.login-form h2 {
+    margin-bottom: 20px;
+    color: #333;
+}
+
+.form-group {
+    margin-bottom: 15px;
+    text-align: left;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: bold;
+    color: #555;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.login-btn {
+    width: 100%;
+    background-color: #007bff;
+    color: white;
+    padding: 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+.login-btn:hover {
+    background-color: #0056b3;
+}
+
+.toggle-form {
+    margin-top: 15px;
+    color: #666;
+}
+
+.toggle-form a {
+    color: #007bff;
+    text-decoration: none;
+}
+
+.toggle-form a:hover {
+    text-decoration: underline;
+}
+
+.login-help {
+    background-color: #e9ecef;
+    padding: 20px;
+    border-radius: 8px;
+    text-align: left;
+}
+
+.help-section {
+    margin-bottom: 15px;
+}
+
+.help-section:last-child {
+    margin-bottom: 0;
+}
+
+.help-section h3 {
+    margin: 0 0 5px 0;
+    color: #495057;
+    font-size: 14px;
+}
+
+.help-section p {
+    margin: 0;
+    color: #6c757d;
+    font-size: 13px;
+}
+
+/*  */

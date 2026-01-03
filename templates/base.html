@@ -6,6 +6,12 @@
 </head>
 <body>
     <div class="container">
+        {% if session.user_id %}
+            <div class="user-header">
+                <span class="user-info">Welcome, {{ session.name }}</span>
+                <a href="{{ url_for('logout') }}" class="logout-btn">Logout</a>
+            </div>
+        {% endif %}
         {% block content %}{% endblock %}
     </div>
     <script src="{{ url_for('static', filename='js/main.js') }}"></script>

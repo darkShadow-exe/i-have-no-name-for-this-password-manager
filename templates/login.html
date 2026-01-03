@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1 class="header">Password Manager</h1>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'error' if category == 'error' else 'success' }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="login-container">
+        <div class="login-form" id="loginForm">
+            <h2>Login</h2>
+            <form method="POST">
+                <input type="hidden" name="action" value="login">
+                
+                <div class="form-group">
+                    <label for="username">Username:</label>
+                    <input type="text" id="username" name="username" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="pin">Master PIN:</label>
+                    <input type="password" id="pin" name="pin" required minlength="4" maxlength="6">
+                </div>
+
+                <button type="submit" class="login-btn">Login</button>
+            </form>
+            
+            <p class="toggle-form">
+                New user? <a href="javascript:void(0)" onclick="toggleForm()">Create Account</a>
+            </p>
+        </div>
+
+        <div class="login-form" id="registerForm" style="display: none;">
+            <h2>Create Account</h2>
+            <form method="POST">
+                <input type="hidden" name="action" value="register">
+                
+                <div class="form-group">
+                    <label for="new_username">Username:</label>
+                    <input type="text" id="new_username" name="new_username" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="name">Full Name:</label>
+                    <input type="text" id="name" name="name" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="new_pin">Master PIN (4-6 digits):</label>
+                    <input type="password" id="new_pin" name="new_pin" required minlength="4" maxlength="6" pattern="[0-9]{4,6}" title="PIN must be 4-6 digits">
+                </div>
+
+                <button type="submit" class="login-btn">Create Account</button>
+            </form>
+            
+            <p class="toggle-form">
+                Already have an account? <a href="javascript:void(0)" onclick="toggleForm()">Login</a>
+            </p>
+        </div>
+
+        <div class="login-help">
+            <div class="help-section">
+                <h3>Existing Users:</h3>
+                <p>Enter your username and Master PIN to access your passwords.</p>
+            </div>
+            <div class="help-section">
+                <h3>New Users:</h3>
+                <p>Click "Create Account" to set up a new account. You'll need a username, your name, and a 4-6 digit Master PIN.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function toggleForm() {
+            const loginForm = document.getElementById('loginForm');
+            const registerForm = document.getElementById('registerForm');
+            
+            if (loginForm.style.display === 'none') {
+                loginForm.style.display = 'block';
+                registerForm.style.display = 'none';
+            } else {
+                loginForm.style.display = 'none';
+                registerForm.style.display = 'block';
+            }
+        }
+    </script>
+{% endblock %}
