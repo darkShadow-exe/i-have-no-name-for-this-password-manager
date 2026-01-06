@@ -32,9 +32,51 @@
 
         <div style="margin-bottom: 15px;">
             <label for="password" style="display: block; margin-bottom: 5px; font-weight: bold;">Password (leave empty to keep current):</label>
-            <input type="password" id="password" name="password" 
-                   style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 3px;"
-                   placeholder="Enter new password or leave empty to keep current">
+            <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+                <div style="position: relative; flex: 1;">
+                    <input type="password" id="password" name="password" 
+                           style="width: 100%; padding: 8px 35px 8px 8px; border: 1px solid #ddd; border-radius: 3px; box-sizing: border-box;"
+                           placeholder="Enter new password or leave empty to keep current">
+                    <button type="button" onclick="togglePasswordVisibility('password', this)" 
+                            style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 12px; padding: 0; color: #666; font-weight: bold;"
+                            title="Toggle password visibility">
+                        Show
+                    </button>
+                </div>
+                <button type="button" onclick="showThemeSelector()" 
+                        style="padding: 8px 15px; background-color: #28a745; color: white; border: none; border-radius: 3px; cursor: pointer; white-space: nowrap;">
+                    Generate Themed
+                </button>
+            </div>
+            
+            <!-- Theme Selector -->
+            <div id="themeSelector" style="display: none; padding: 15px; background-color: #f8f9fa; border-radius: 5px; margin-top: 10px;">
+                <p style="margin: 0 0 10px 0; font-weight: bold;">Enter any theme for your password:</p>
+                
+                <div style="display: flex; gap: 5px; margin-bottom: 15px;">
+                    <input type="text" id="customTheme" placeholder="e.g., ocean, space, cyberpunk, medieval, coffee..." 
+                           style="flex: 1; padding: 8px; border: 1px solid #ddd; border-radius: 3px;">
+                    <button type="button" onclick="generateCustomThemePassword()" 
+                            style="padding: 8px 15px; background-color: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer;">
+                        Generate
+                    </button>
+                </div>
+                
+                <p style="margin: 0 0 10px 0; font-size: 14px; color: #666;">Quick options:</p>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 15px;">
+                    <button type="button" onclick="setTheme('cyberpunk')" class="quick-theme-btn" style="padding: 4px 8px; background-color: #6f42c1; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px;">🤖 Cyberpunk</button>
+                    <button type="button" onclick="setTheme('ocean')" class="quick-theme-btn" style="padding: 4px 8px; background-color: #17a2b8; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px;">🌊 Ocean</button>
+                    <button type="button" onclick="setTheme('space')" class="quick-theme-btn" style="padding: 4px 8px; background-color: #6610f2; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px;">🚀 Space</button>
+                    <button type="button" onclick="setTheme('medieval')" class="quick-theme-btn" style="padding: 4px 8px; background-color: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px;">🏰 Medieval</button>
+                    <button type="button" onclick="setTheme('nature')" class="quick-theme-btn" style="padding: 4px 8px; background-color: #28a745; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px;">🌳 Nature</button>
+                    <button type="button" onclick="setTheme('music')" class="quick-theme-btn" style="padding: 4px 8px; background-color: #e83e8c; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px;">🎵 Music</button>
+                </div>
+                
+                <div style="text-align: center; margin-bottom: 10px;">
+                    <button type="button" onclick="hideThemeSelector()" style="padding: 5px 15px; background-color: #6c757d; color: white; border: none; border-radius: 3px; cursor: pointer;">Cancel</button>
+                </div>
+                <div id="generationStatus" style="margin-top: 10px; padding: 8px; border-radius: 3px; display: none;"></div>
+            </div>
         </div>
 
         <div style="margin-bottom: 20px;">
@@ -55,4 +97,5 @@
             </a>
         </div>
     </form>
+    
 {% endblock %}

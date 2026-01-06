@@ -1,7 +1,9 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 import sqlite3
 import os
-from datetime import datetime
+import requests
+import json
+from datetime import datetime, timedelta
 import base64
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -9,6 +11,20 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.backends import default_backend
 import secrets
 import os
+from dotenv import load_dotenv
+import re
+import pyotp
+import qrcode
+from io import BytesIO
+import base64 as b64
+from email_validator import validate_email as email_validate, EmailNotValidError
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import random
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY','81e4d43525b60123b078435d6186c9a1c66ce2e406584f0da936178d8a8aecee')
@@ -43,9 +59,20 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
             name TEXT NOT NULL,
             master_pin TEXT NOT NULL,
             salt TEXT NOT NULL,
+            otp_secret TEXT,
+            otp_enabled INTEGER DEFAULT 0,
+            security_question1 TEXT,
+            security_answer1 TEXT,
+            security_question2 TEXT,
+            security_answer2 TEXT,
+            security_question3 TEXT,
+            security_answer3 TEXT,
+            email_otp_code TEXT,
+            email_otp_expires TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
@@ -84,9 +111,20 @@ def migrate_to_multi_user(cursor):
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
+                email TEXT UNIQUE NOT NULL,
                 name TEXT NOT NULL,
                 master_pin TEXT NOT NULL,
                 salt TEXT NOT NULL,
+                otp_secret TEXT,
+                otp_enabled INTEGER DEFAULT 0,
+                security_question1 TEXT,
+                security_answer1 TEXT,
+                security_question2 TEXT,
+                security_answer2 TEXT,
+                security_question3 TEXT,
+                security_answer3 TEXT,
+                email_otp_code TEXT,
+                email_otp_expires TIMESTAMP,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
@@ -94,8 +132,8 @@ def migrate_to_multi_user(cursor):
         # Create default user
         default_pin_encrypted, default_salt = encrypt_master_pin("1234")
         cursor.execute(
-            'INSERT INTO users (username, name, master_pin, salt) VALUES (?, ?, ?, ?)',
-            ('admin', 'Default User', default_pin_encrypted, default_salt)
+            'INSERT INTO users (username, email, name, master_pin, salt) VALUES (?, ?, ?, ?, ?)',
+            ('admin', 'admin@example.com', 'Default User', default_pin_encrypted, default_salt)
         )
         default_user_id = cursor.lastrowid
         
@@ -149,6 +187,111 @@ def get_registration_master_key():
     # This ensures all user PINs can be decrypted later
     return base64.urlsafe_b64encode(b'registration_master_key_v1_fixed').decode()
 
+def validate_email(email):
+    """Validate email format using email-validator library"""
+    try:
+        email_validate(email)
+        return True
+    except EmailNotValidError:
+        return False
+
+def send_email_otp(email, otp_code, name):
+    """Send OTP via email"""
+    try:
+        # Check if email settings are configured
+        smtp_server = os.environ.get('SMTP_SERVER')
+        smtp_port = int(os.environ.get('SMTP_PORT', 587))
+        smtp_username = os.environ.get('SMTP_USERNAME')
+        smtp_password = os.environ.get('SMTP_PASSWORD')
+        
+        if not all([smtp_server, smtp_username, smtp_password]):
+            print(f"📧 Email OTP for {name} ({email}): {otp_code}")
+            print(f"This OTP will expire in 5 minutes.")
+            print("⚠️  To enable real email sending, configure SMTP settings in .env file")
+            return True
+        
+        # Real email sending
+        msg = MIMEMultipart()
+        msg['From'] = smtp_username
+        msg['To'] = email
+        msg['Subject'] = "Password Manager - Login OTP"
+        
+        body = f"""
+Hello {name},
+
+Your login OTP is: {otp_code}
+
+This code will expire in 5 minutes.
+
+If you didn't request this code, please ignore this email.
+
+Best regards,
+Password Manager Team
+"""
+        
+        msg.attach(MIMEText(body, 'plain'))
+        
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()
+        server.login(smtp_username, smtp_password)
+        server.send_message(msg)
+        server.quit()
+        
+        print(f"✅ Email OTP sent successfully to {email}")
+        return True
+        
+    except Exception as e:
+        print(f"Failed to send email OTP: {e}")
+        # Fallback to console output if email fails
+        print(f"📧 FALLBACK - Email OTP for {name} ({email}): {otp_code}")
+        return True
+
+def generate_email_otp():
+    """Generate a 6-digit OTP for email verification"""
+    return str(random.randint(100000, 999999))
+
+def generate_totp_secret():
+    """Generate a new TOTP secret for authenticator app"""
+    return pyotp.random_base32()
+
+def get_totp_qr_code(secret, email, username):
+    """Generate QR code for TOTP setup"""
+    totp_uri = pyotp.totp.TOTP(secret).provisioning_uri(
+        name=email,
+        issuer_name=f"Password Manager ({username})"
+    )
+    
+    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+    qr.add_data(totp_uri)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    buffer = BytesIO()
+    img.save(buffer, format='PNG')
+    buffer.seek(0)
+    
+    return b64.b64encode(buffer.getvalue()).decode()
+
+def verify_totp(secret, token):
+    """Verify TOTP token"""
+    totp = pyotp.TOTP(secret)
+    return totp.verify(token, valid_window=1)
+
+def get_security_questions():
+    """Return predefined security questions"""
+    return [
+        "What was the name of your first pet?",
+        "What city were you born in?",
+        "What was your mother's maiden name?",
+        "What was the name of your elementary school?",
+        "What was your favorite childhood book?",
+        "What was the make of your first car?",
+        "What was your childhood nickname?",
+        "What was the name of your favorite teacher?",
+        "What street did you grow up on?",
+        "What was your favorite food as a child?"
+    ]
+
 def encrypt_master_pin(pin: str) -> tuple:
     """Encrypt master PIN using AES-GCM with salt"""
     salt = os.urandom(16)
@@ -172,10 +315,11 @@ def encrypt_master_pin(pin: str) -> tuple:
     
     return base64.urlsafe_b64encode(encrypted_data).decode(), base64.urlsafe_b64encode(salt).decode()
 
-def verify_master_pin(username, pin):
-    """Verify master PIN for user"""
+def verify_master_pin(identifier, pin):
+    """Verify master PIN for user using email or username"""
     conn = get_db_connection()
-    user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+    # Try to find user by email first, then by username
+    user = conn.execute('SELECT * FROM users WHERE email = ? OR username = ?', (identifier, identifier)).fetchone()
     conn.close()
     
     if not user:
@@ -207,8 +351,7 @@ def verify_master_pin(username, pin):
         decrypted_pin = plaintext.decode()
         
         return decrypted_pin == pin
-    except Exception as e:
-        print(f"Authentication error: {e}")
+    except Exception:
         return False
 
 def require_auth(f):
@@ -233,12 +376,16 @@ def derive_key(password: str, salt: bytes) -> bytes:
     return kdf.derive(master_password)
 
 def encrypt_password(password: str) -> tuple:
-    """Encrypt password using AES-GCM with salt"""
+    """Encrypt password using AES-GCM with user's master PIN and salt"""
     # Generate a random salt for this password
     salt = os.urandom(16)
     
-    # Derive key from master password and salt
-    master_password = get_master_key().encode()
+    # Get the user's master PIN from session
+    if 'user_master_pin' not in session:
+        raise Exception("No master PIN in session")
+    
+    # Derive key from user's master PIN and salt
+    master_password = session['user_master_pin'].encode()
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -264,19 +411,26 @@ def encrypt_password(password: str) -> tuple:
     return base64.urlsafe_b64encode(encrypted_data).decode(), base64.urlsafe_b64encode(salt).decode()
 
 def decrypt_password(encrypted_password: str, salt_b64: str) -> str:
-    """Decrypt password using AES-GCM"""
+    """Decrypt password using AES-GCM with user's master PIN"""
     try:
+        # Get the user's master PIN from session
+        if 'user_master_pin' not in session:
+            return "[No master PIN in session]"
+        
         # Decode from base64
         encrypted_data = base64.urlsafe_b64decode(encrypted_password.encode())
         salt = base64.urlsafe_b64decode(salt_b64.encode())
         
         # Extract IV, tag, and ciphertext
+        if len(encrypted_data) < 28:  # Minimum: 12 (IV) + 16 (tag)
+            return "[Corrupted data]"
+            
         iv = encrypted_data[:12]
         tag = encrypted_data[12:28]
         ciphertext = encrypted_data[28:]
         
-        # Derive key using the same method as encryption
-        master_password = get_master_key().encode()
+        # Derive key using the user's master PIN
+        master_password = session['user_master_pin'].encode()
         kdf = PBKDF2HMAC(
             algorithm=hashes.SHA256(),
             length=32,
@@ -293,8 +447,8 @@ def decrypt_password(encrypted_password: str, salt_b64: str) -> str:
         # Decrypt
         plaintext = decryptor.update(ciphertext) + decryptor.finalize()
         return plaintext.decode()
-    except Exception:
-        return "[Encrypted]"
+    except Exception as e:
+        return f"[Decryption failed: {type(e).__name__}]"
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -303,31 +457,66 @@ def login():
         action = request.form.get('action')
         
         if action == 'login':
-            username = request.form['username']
+            identifier = request.form['identifier']  # Can be email or username
             pin = request.form['pin']
             
-            if verify_master_pin(username, pin):
+            if verify_master_pin(identifier, pin):
                 conn = get_db_connection()
-                user = conn.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
+                user = conn.execute('SELECT * FROM users WHERE email = ? OR username = ?', (identifier, identifier)).fetchone()
                 conn.close()
                 
-                session['user_id'] = user['id']
-                session['username'] = user['username']
-                session['name'] = user['name']
+                # Generate email OTP for verification
+                otp_code = generate_email_otp()
+                otp_expires = datetime.now() + timedelta(minutes=5)
                 
-                flash(f'Welcome back, {user["name"]}!', 'success')
-                return redirect(url_for('index'))
+                # Store OTP in database
+                conn = get_db_connection()
+                conn.execute('UPDATE users SET email_otp_code = ?, email_otp_expires = ? WHERE id = ?',
+                           (otp_code, otp_expires, user['id']))
+                conn.commit()
+                conn.close()
+                
+                # Send OTP via email
+                if send_email_otp(user['email'], otp_code, user['name']):
+                    session['temp_user_id'] = user['id']
+                    session['temp_username'] = user['username']
+                    session['temp_email'] = user['email']
+                    session['temp_name'] = user['name']
+                    session['temp_pin'] = pin
+                    
+                    flash('OTP sent to your email. Please check your email and enter the code.', 'success')
+                    return render_template('otp_verification.html')
+                else:
+                    flash('Failed to send OTP. Please try again.', 'error')
             else:
-                flash('Invalid username or PIN!', 'error')
+                flash('Invalid email/username or PIN!', 'error')
                 
         elif action == 'register':
             username = request.form['new_username']
+            email = request.form['email']
             name = request.form['name']
             pin = request.form['new_pin']
             
+            # Security questions
+            security_q1 = request.form['security_question1']
+            security_a1 = request.form['security_answer1'].lower().strip()
+            security_q2 = request.form['security_question2']
+            security_a2 = request.form['security_answer2'].lower().strip()
+            security_q3 = request.form['security_question3']
+            security_a3 = request.form['security_answer3'].lower().strip()
+            
+            # Validation
+            if not validate_email(email):
+                flash('Please enter a valid email address!', 'error')
+                return render_template('login.html', security_questions=get_security_questions())
+                
             if len(pin) < 4 or len(pin) > 6:
                 flash('PIN must be 4-6 digits!', 'error')
-                return render_template('login.html')
+                return render_template('login.html', security_questions=get_security_questions())
+                
+            if not all([security_a1, security_a2, security_a3]):
+                flash('Please answer all security questions!', 'error')
+                return render_template('login.html', security_questions=get_security_questions())
             
             conn = get_db_connection()
             
@@ -336,14 +525,24 @@ def login():
             if existing_user:
                 flash('Username already exists!', 'error')
                 conn.close()
-                return render_template('login.html')
+                return render_template('login.html', security_questions=get_security_questions())
+                
+            # Check if email already exists
+            existing_email = conn.execute('SELECT * FROM users WHERE email = ?', (email,)).fetchone()
+            if existing_email:
+                flash('Email already exists!', 'error')
+                conn.close()
+                return render_template('login.html', security_questions=get_security_questions())
             
-            # Create new user
+            # Create new user with security questions
             encrypted_pin, salt = encrypt_master_pin(pin)
             cursor = conn.cursor()
             cursor.execute(
-                'INSERT INTO users (username, name, master_pin, salt) VALUES (?, ?, ?, ?)',
-                (username, name, encrypted_pin, salt)
+                '''INSERT INTO users (username, email, name, master_pin, salt, 
+                   security_question1, security_answer1, security_question2, security_answer2, 
+                   security_question3, security_answer3) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (username, email, name, encrypted_pin, salt,
+                 security_q1, security_a1, security_q2, security_a2, security_q3, security_a3)
             )
             conn.commit()
             
@@ -352,12 +551,186 @@ def login():
             
             session['user_id'] = user_id
             session['username'] = username
+            session['email'] = email
             session['name'] = name
+            session['user_master_pin'] = pin
             
             flash(f'Welcome, {name}! Your account has been created.', 'success')
             return redirect(url_for('index'))
     
-    return render_template('login.html')
+    return render_template('login.html', security_questions=get_security_questions())
+
+@app.route('/verify_otp', methods=['GET', 'POST'])
+def verify_otp():
+    """Verify OTP for login"""
+    if 'temp_user_id' not in session:
+        flash('Session expired. Please login again.', 'error')
+        return redirect(url_for('login'))
+    
+    if request.method == 'POST':
+        entered_otp = request.form['otp_code']
+        
+        conn = get_db_connection()
+        user = conn.execute('SELECT * FROM users WHERE id = ?', (session['temp_user_id'],)).fetchone()
+        
+        if user and user['email_otp_code'] == entered_otp:
+            # Check if OTP has not expired
+            otp_expires = datetime.strptime(user['email_otp_expires'], '%Y-%m-%d %H:%M:%S.%f')
+            if datetime.now() <= otp_expires:
+                # Clear OTP from database
+                conn.execute('UPDATE users SET email_otp_code = NULL, email_otp_expires = NULL WHERE id = ?',
+                           (session['temp_user_id'],))
+                conn.commit()
+                conn.close()
+                
+                # Complete login
+                session['user_id'] = session.pop('temp_user_id')
+                session['username'] = session.pop('temp_username')
+                session['email'] = session.pop('temp_email')
+                session['name'] = session.pop('temp_name')
+                session['user_master_pin'] = session.pop('temp_pin')
+                
+                flash(f'Welcome back, {session["name"]}!', 'success')
+                return redirect(url_for('index'))
+            else:
+                flash('OTP has expired. Please login again.', 'error')
+                conn.close()
+                session.clear()
+                return redirect(url_for('login'))
+        else:
+            flash('Invalid OTP. Please try again.', 'error')
+            conn.close()
+    
+    return render_template('otp_verification.html')
+
+@app.route('/forgot_password', methods=['GET', 'POST'])
+def forgot_password():
+    """Password recovery using security questions"""
+    if request.method == 'POST':
+        if 'step' not in request.form:
+            # Step 1: Verify email/username
+            identifier = request.form['identifier']
+            conn = get_db_connection()
+            user = conn.execute('SELECT * FROM users WHERE email = ? OR username = ?', (identifier, identifier)).fetchone()
+            
+            if user and user['security_question1']:
+                conn.close()
+                session['recovery_user_id'] = user['id']
+                return render_template('security_questions.html', 
+                                     questions=[user['security_question1'], user['security_question2'], user['security_question3']])
+            else:
+                conn.close()
+                flash('User not found or security questions not set up.', 'error')
+        else:
+            # Step 2: Verify security questions
+            if 'recovery_user_id' not in session:
+                flash('Session expired. Please try again.', 'error')
+                return redirect(url_for('forgot_password'))
+            
+            conn = get_db_connection()
+            user = conn.execute('SELECT * FROM users WHERE id = ?', (session['recovery_user_id'],)).fetchone()
+            
+            answer1 = request.form['answer1'].lower().strip()
+            answer2 = request.form['answer2'].lower().strip()
+            answer3 = request.form['answer3'].lower().strip()
+            
+            if (user['security_answer1'] == answer1 and 
+                user['security_answer2'] == answer2 and 
+                user['security_answer3'] == answer3):
+                
+                conn.close()
+                return render_template('reset_pin.html')
+            else:
+                conn.close()
+                flash('Incorrect answers to security questions.', 'error')
+                session.pop('recovery_user_id', None)
+                return redirect(url_for('forgot_password'))
+    
+    return render_template('forgot_password.html')
+
+@app.route('/reset_pin', methods=['POST'])
+def reset_pin():
+    """Reset master PIN after security question verification"""
+    if 'recovery_user_id' not in session:
+        flash('Session expired. Please try again.', 'error')
+        return redirect(url_for('forgot_password'))
+    
+    new_pin = request.form['new_pin']
+    confirm_pin = request.form['confirm_pin']
+    
+    if len(new_pin) < 4 or len(new_pin) > 6:
+        flash('PIN must be 4-6 digits!', 'error')
+        return render_template('reset_pin.html')
+    
+    if new_pin != confirm_pin:
+        flash('PINs do not match!', 'error')
+        return render_template('reset_pin.html')
+    
+    # Update PIN in database
+    encrypted_pin, salt = encrypt_master_pin(new_pin)
+    conn = get_db_connection()
+    conn.execute('UPDATE users SET master_pin = ?, salt = ? WHERE id = ?',
+                (encrypted_pin, salt, session['recovery_user_id']))
+    conn.commit()
+    conn.close()
+    
+    session.pop('recovery_user_id', None)
+    flash('Master PIN has been reset successfully! Please login with your new PIN.', 'success')
+    return redirect(url_for('login'))
+
+@app.route('/setup_totp')
+@require_auth
+def setup_totp():
+    """Setup TOTP (Authenticator app) for the user"""
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    
+    if not user['otp_secret']:
+        # Generate new secret
+        secret = generate_totp_secret()
+        conn.execute('UPDATE users SET otp_secret = ? WHERE id = ?', (secret, session['user_id']))
+        conn.commit()
+    else:
+        secret = user['otp_secret']
+    
+    conn.close()
+    
+    # Generate QR code
+    qr_code = get_totp_qr_code(secret, session['email'], session['username'])
+    
+    return render_template('setup_totp.html', qr_code=qr_code, secret=secret)
+
+@app.route('/enable_totp', methods=['POST'])
+@require_auth
+def enable_totp():
+    """Enable TOTP after verification"""
+    token = request.form['totp_token']
+    
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    
+    if verify_totp(user['otp_secret'], token):
+        conn.execute('UPDATE users SET otp_enabled = 1 WHERE id = ?', (session['user_id'],))
+        conn.commit()
+        conn.close()
+        flash('TOTP enabled successfully!', 'success')
+    else:
+        conn.close()
+        flash('Invalid TOTP token. Please try again.', 'error')
+    
+    return redirect(url_for('settings'))
+
+@app.route('/disable_totp', methods=['POST'])
+@require_auth
+def disable_totp():
+    """Disable TOTP for the user"""
+    conn = get_db_connection()
+    conn.execute('UPDATE users SET otp_enabled = 0 WHERE id = ?', (session['user_id'],))
+    conn.commit()
+    conn.close()
+    
+    flash('Two-factor authentication has been disabled.', 'success')
+    return redirect(url_for('settings'))
 
 @app.route('/logout')
 def logout():
@@ -365,6 +738,256 @@ def logout():
     session.clear()
     flash('You have been logged out.', 'success')
     return redirect(url_for('login'))
+
+@app.route('/settings', methods=['GET', 'POST'])
+@require_auth
+def settings():
+    """User settings page"""
+    if request.method == 'POST':
+        action = request.form.get('action')
+        
+        if action == 'update_profile':
+            new_username = request.form['username']
+            new_email = request.form['email']
+            new_name = request.form['name']
+            
+            # Validate email
+            if not validate_email(new_email):
+                flash('Please enter a valid email address!', 'error')
+                conn = get_db_connection()
+                user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+                conn.close()
+                totp_enabled = bool(user['otp_enabled']) if user else False
+                return render_template('settings.html', 
+                                     totp_enabled=totp_enabled,
+                                     security_questions=get_security_questions(),
+                                     user_security_q1=user['security_question1'] if user else '',
+                                     user_security_q2=user['security_question2'] if user else '',
+                                     user_security_q3=user['security_question3'] if user else '')
+            
+            conn = get_db_connection()
+            
+            # Check if new username is taken by another user
+            if new_username != session['username']:
+                existing_user = conn.execute('SELECT * FROM users WHERE username = ? AND id != ?', 
+                                           (new_username, session['user_id'])).fetchone()
+                if existing_user:
+                    flash('Username already taken!', 'error')
+                    conn.close()
+                    conn = get_db_connection()
+                    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+                    conn.close()
+                    totp_enabled = bool(user['otp_enabled']) if user else False
+                    return render_template('settings.html', 
+                                         totp_enabled=totp_enabled,
+                                         security_questions=get_security_questions(),
+                                         user_security_q1=user['security_question1'] if user else '',
+                                         user_security_q2=user['security_question2'] if user else '',
+                                         user_security_q3=user['security_question3'] if user else '')
+            
+            # Check if new email is taken by another user
+            if new_email != session['email']:
+                existing_email = conn.execute('SELECT * FROM users WHERE email = ? AND id != ?', 
+                                            (new_email, session['user_id'])).fetchone()
+                if existing_email:
+                    flash('Email already taken!', 'error')
+                    conn.close()
+                    conn = get_db_connection()
+                    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+                    conn.close()
+                    totp_enabled = bool(user['otp_enabled']) if user else False
+                    return render_template('settings.html', 
+                                         totp_enabled=totp_enabled,
+                                         security_questions=get_security_questions(),
+                                         user_security_q1=user['security_question1'] if user else '',
+                                         user_security_q2=user['security_question2'] if user else '',
+                                         user_security_q3=user['security_question3'] if user else '')
+            
+            # Update user profile
+            conn.execute('UPDATE users SET username = ?, email = ?, name = ? WHERE id = ?',
+                        (new_username, new_email, new_name, session['user_id']))
+            conn.commit()
+            conn.close()
+            
+            # Update session
+            session['username'] = new_username
+            session['email'] = new_email
+            session['name'] = new_name
+            
+            flash('Profile updated successfully!', 'success')
+            return redirect(url_for('settings'))
+            
+        elif action == 'change_pin':
+            current_pin = request.form['current_pin']
+            new_pin = request.form['new_pin']
+            confirm_pin = request.form['confirm_pin']
+            otp_code = request.form.get('otp_code', '')
+            
+            # Verify current PIN
+            if session['user_master_pin'] != current_pin:
+                flash('Current PIN is incorrect!', 'error')
+                conn = get_db_connection()
+                user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+                conn.close()
+                totp_enabled = bool(user['otp_enabled']) if user else False
+                return render_template('settings.html', totp_enabled=totp_enabled, 
+                                     security_questions=get_security_questions(),
+                                     user_security_q1=user['security_question1'],
+                                     user_security_q2=user['security_question2'],
+                                     user_security_q3=user['security_question3'])
+            
+            # Validate new PIN
+            if len(new_pin) < 4 or len(new_pin) > 6:
+                flash('PIN must be 4-6 digits!', 'error')
+                conn = get_db_connection()
+                user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+                conn.close()
+                totp_enabled = bool(user['otp_enabled']) if user else False
+                return render_template('settings.html', totp_enabled=totp_enabled,
+                                     security_questions=get_security_questions(),
+                                     user_security_q1=user['security_question1'],
+                                     user_security_q2=user['security_question2'],
+                                     user_security_q3=user['security_question3'])
+            
+            if new_pin != confirm_pin:
+                flash('New PINs do not match!', 'error')
+                conn = get_db_connection()
+                user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+                conn.close()
+                totp_enabled = bool(user['otp_enabled']) if user else False
+                return render_template('settings.html', totp_enabled=totp_enabled,
+                                     security_questions=get_security_questions(),
+                                     user_security_q1=user['security_question1'],
+                                     user_security_q2=user['security_question2'],
+                                     user_security_q3=user['security_question3'])
+            
+            # Check if OTP verification is required
+            skip_email_otp = os.environ.get('SKIP_EMAIL_OTP', 'False').lower() == 'true'
+            
+            if not skip_email_otp:
+                if not otp_code:
+                    # Generate and send OTP for PIN change
+                    conn = get_db_connection()
+                    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+                    
+                    otp_code_generated = generate_email_otp()
+                    otp_expires = datetime.now() + timedelta(minutes=5)
+                    
+                    conn.execute('UPDATE users SET email_otp_code = ?, email_otp_expires = ? WHERE id = ?',
+                               (otp_code_generated, otp_expires, session['user_id']))
+                    conn.commit()
+                    conn.close()
+                    
+                    if send_email_otp(user['email'], otp_code_generated, user['name']):
+                        session['pending_pin_change'] = {
+                            'current_pin': current_pin,
+                            'new_pin': new_pin,
+                            'confirm_pin': confirm_pin
+                        }
+                        flash('OTP sent to your email for PIN change verification.', 'success')
+                        return render_template('pin_change_otp.html')
+                    else:
+                        flash('Failed to send OTP. Please try again.', 'error')
+                        conn = get_db_connection()
+                        user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+                        conn.close()
+                        totp_enabled = bool(user['otp_enabled']) if user else False
+                        return render_template('settings.html', totp_enabled=totp_enabled,
+                                             security_questions=get_security_questions(),
+                                             user_security_q1=user['security_question1'],
+                                             user_security_q2=user['security_question2'],
+                                             user_security_q3=user['security_question3'])
+                else:
+                    # Verify OTP
+                    conn = get_db_connection()
+                    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+                    
+                    if user and user['email_otp_code'] == otp_code:
+                        otp_expires = datetime.strptime(user['email_otp_expires'], '%Y-%m-%d %H:%M:%S.%f')
+                        if datetime.now() <= otp_expires:
+                            # Clear OTP
+                            conn.execute('UPDATE users SET email_otp_code = NULL, email_otp_expires = NULL WHERE id = ?',
+                                       (session['user_id'],))
+                            
+                            # Get pending PIN change data
+                            if 'pending_pin_change' in session:
+                                new_pin = session['pending_pin_change']['new_pin']
+                                session.pop('pending_pin_change')
+                            else:
+                                flash('PIN change session expired. Please try again.', 'error')
+                                conn.close()
+                                return redirect(url_for('settings'))
+                        else:
+                            flash('OTP has expired. Please try again.', 'error')
+                            conn.close()
+                            session.pop('pending_pin_change', None)
+                            return redirect(url_for('settings'))
+                    else:
+                        flash('Invalid OTP. Please try again.', 'error')
+                        conn.close()
+                        return render_template('pin_change_otp.html')
+            
+            # Update PIN in database
+            encrypted_pin, salt = encrypt_master_pin(new_pin)
+            conn = get_db_connection()
+            conn.execute('UPDATE users SET master_pin = ?, salt = ? WHERE id = ?',
+                        (encrypted_pin, salt, session['user_id']))
+            conn.commit()
+            conn.close()
+            
+            # Update session
+            session['user_master_pin'] = new_pin
+            session.pop('pending_pin_change', None)
+            
+            flash('Master PIN changed successfully!', 'success')
+            return redirect(url_for('settings'))
+        
+        elif action == 'update_security_questions':
+            security_q1 = request.form['security_question1']
+            security_a1 = request.form['security_answer1'].lower().strip()
+            security_q2 = request.form['security_question2']
+            security_a2 = request.form['security_answer2'].lower().strip()
+            security_q3 = request.form['security_question3']
+            security_a3 = request.form['security_answer3'].lower().strip()
+            
+            if not all([security_a1, security_a2, security_a3]):
+                flash('Please answer all security questions!', 'error')
+                conn = get_db_connection()
+                user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+                conn.close()
+                totp_enabled = bool(user['otp_enabled']) if user else False
+                return render_template('settings.html', totp_enabled=totp_enabled,
+                                     security_questions=get_security_questions(),
+                                     user_security_q1=user['security_question1'],
+                                     user_security_q2=user['security_question2'],
+                                     user_security_q3=user['security_question3'])
+            
+            # Update security questions
+            conn = get_db_connection()
+            conn.execute('''UPDATE users SET security_question1 = ?, security_answer1 = ?, 
+                           security_question2 = ?, security_answer2 = ?, 
+                           security_question3 = ?, security_answer3 = ? WHERE id = ?''',
+                        (security_q1, security_a1, security_q2, security_a2, 
+                         security_q3, security_a3, session['user_id']))
+            conn.commit()
+            conn.close()
+            
+            flash('Security questions updated successfully!', 'success')
+            return redirect(url_for('settings'))
+    
+    # Get current user's 2FA status and security questions
+    conn = get_db_connection()
+    user = conn.execute('SELECT * FROM users WHERE id = ?', (session['user_id'],)).fetchone()
+    conn.close()
+    
+    totp_enabled = bool(user['otp_enabled']) if user else False
+    
+    return render_template('settings.html', 
+                         totp_enabled=totp_enabled,
+                         security_questions=get_security_questions(),
+                         user_security_q1=user['security_question1'] if user else '',
+                         user_security_q2=user['security_question2'] if user else '',
+                         user_security_q3=user['security_question3'] if user else '')
 
 @app.route('/')
 @require_auth
@@ -486,6 +1109,118 @@ def view_password(account_id):
         return {'password': decrypted_password}
     except Exception:
         return {'password': '[Decryption failed]'}
+
+@app.route('/get_password/<int:account_id>')
+@require_auth
+def get_password(account_id):
+    """Get decrypted password for display"""
+    conn = get_db_connection()
+    
+    account = conn.execute('SELECT password, salt FROM accounts WHERE id = ? AND user_id = ?', 
+                   (account_id, session['user_id'])).fetchone()
+    conn.close()
+    
+    if not account:
+        return {'error': 'Account not found'}, 404
+    
+    try:
+        decrypted_password = decrypt_password(account['password'], account['salt'])
+        return {'password': decrypted_password}
+    except Exception as e:
+        return {'password': '[Decryption failed]'}
+
+@app.route('/generate_themed_password', methods=['POST'])
+@require_auth
+def generate_themed_password():
+    """Generate a themed password using LLM API"""
+    data = request.get_json()
+    theme = data.get('theme', 'strong')
+    
+    # API configuration - get API key from environment variable
+    api_key = os.environ.get('HACKCLUB_API_KEY')
+    api_url = "https://ai.hackclub.com/proxy/v1/chat/completions"
+    
+    # Dynamic prompt generation based on any theme
+    prompt = f"""Generate a single password inspired by the theme "{theme}".
+
+REQUIREMENTS:
+- Exactly 10-16 characters long
+- Must contain: letters, numbers, and symbols (@#$%^&*)
+- Theme-inspired but still secure
+- Output ONLY the password, no explanations
+
+EXAMPLES:
+Theme "ocean": Wave2024@
+Theme "space": Star#Light9
+Theme "coffee": Brew!Cup7
+
+Theme "{theme}":"""
+    
+    headers = {
+        'Authorization': f'Bearer {api_key}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        'model': 'google/gemini-2.5-flash',
+        'messages': [
+            {'role': 'user', 'content': prompt}
+        ],
+        'max_tokens': 50,
+        'temperature': 0.8
+    }
+    
+    try:
+        # Try with retry logic
+        for attempt in range(3):
+            try:
+                response = requests.post(api_url, headers=headers, json=payload, timeout=30)
+                response.raise_for_status()
+                
+                result = response.json()
+                original_password = result['choices'][0]['message']['content'].strip()
+                break  # Success, exit retry loop
+                
+            except requests.Timeout:
+                if attempt == 2:  # Last attempt
+                    raise
+                continue
+            except requests.RequestException as e:
+                if attempt == 2:
+                    raise
+        
+        # Clean up the password (remove any extra text)
+        password = original_password.split('\n')[0].strip()
+        # Remove quotes if present
+        password = password.strip('"\'')
+        # Remove common prefixes that LLMs might add
+        password = password.replace('Password:', '').replace('password:', '').strip()
+        
+        # Extract just the password if there's extra text
+        import re
+        # Look for password-like patterns (letters, numbers, special chars, 8-20 chars)
+        password_match = re.search(r'[A-Za-z0-9@#$%^&*()_+\-=\[\]{}|;:,.<>?!~`]{8,20}', password)
+        if password_match:
+            password = password_match.group()
+        
+        # Validate password length (more lenient range)
+        if len(password) < 6 or len(password) > 30:
+            # Generate a fallback password if the LLM output is unusable
+            import string
+            import secrets
+            chars = string.ascii_letters + string.digits + '@#$%^&*'
+            fallback = ''.join(secrets.choice(chars) for _ in range(12))
+            # Add theme prefix if short enough
+            if len(theme) <= 4:
+                fallback = theme.capitalize() + fallback[:8]
+            password = fallback
+            
+        return {'password': password, 'theme': theme}
+        
+    except requests.RequestException as e:
+        return {'error': f'API request failed: {str(e)}'}, 500
+    except Exception as e:
+        return {'error': f'Password generation failed: {str(e)}'}, 500
 
 if __name__ == '__main__':
     init_db()

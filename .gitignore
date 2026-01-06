@@ -1,2 +1,4 @@
-.venv/
 passwords.db
+.env
+__pycache__/
+.venv/

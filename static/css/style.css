@@ -31,6 +31,8 @@ h1, h2 {
 .nav {
     margin-bottom: 20px;
     text-align: center;
+    padding: 15px 0;
+    border-bottom: 1px solid #ddd;
 }
 
 .nav a {
@@ -46,6 +48,14 @@ h1, h2 {
 .nav a:hover {
     background-color: #007bff;
     color: white;
+}
+
+.user-info {
+    float: right;
+    color: #666;
+    font-weight: bold;
+    margin-right: 10px;
+    line-height: 34px;
 }
 
 .alert {
@@ -436,5 +446,3 @@ button:hover {
     color: #6c757d;
     font-size: 13px;
 }
-
-/*  */

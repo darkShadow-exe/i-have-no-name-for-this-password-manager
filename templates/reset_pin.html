@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <h1 class="header">Reset Master PIN</h1>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'error' if category == 'error' else 'success' }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="reset-container">
+        <div class="reset-form">
+            <h2>Set New Master PIN</h2>
+            <p>Your security questions have been verified. Please choose a new Master PIN for your account.</p>
+            
+            <form method="POST" action="{{ url_for('reset_pin') }}">
+                <div class="form-group">
+                    <label for="new_pin">New Master PIN (4-6 digits):</label>
+                    <input type="password" id="new_pin" name="new_pin" required minlength="4" maxlength="6" 
+                           pattern="[0-9]{4,6}" title="PIN must be 4-6 digits">
+                </div>
+
+                <div class="form-group">
+                    <label for="confirm_pin">Confirm Master PIN:</label>
+                    <input type="password" id="confirm_pin" name="confirm_pin" required minlength="4" maxlength="6" 
+                           pattern="[0-9]{4,6}" title="PIN must be 4-6 digits">
+                </div>
+
+                <button type="submit" class="login-btn">Reset PIN</button>
+            </form>
+        </div>
+    </div>
+
+    <style>
+        .reset-container {
+            max-width: 400px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        
+        .reset-form {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .reset-form h2 {
+            color: #333;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .reset-form p {
+            color: #666;
+            margin-bottom: 25px;
+            line-height: 1.5;
+            text-align: center;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .login-btn {
+            background-color: #4CAF50;
+            color: white;
+            padding: 12px 30px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+        }
+        
+        .login-btn:hover {
+            background-color: #45a049;
+        }
+    </style>
+{% endblock %}
